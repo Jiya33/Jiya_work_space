@@ -1,20 +1,47 @@
 #!/bin/bash
+# Jiya 智能工作台 — 一键部署到 GitHub Pages (gh-pages 分支)
+# 用法: ./deploy.sh <你的GitHub_Token>
+
 set -e
 
-# ====== Jiya 智能工作台 - 本地构建并部署到 gh-pages 分支 ======
-cd /Users/jiya/WorkBuddy/2026-07-31-00-18-51/jiya-smart-workbench
+TOKEN="$1"
+USER="Jiya33"
+REPO="Jiya_work_space"
 
-NPM=/Users/jiya/.workbuddy/binaries/node/versions/22.22.2/bin/npm
+if [ -z "$TOKEN" ]; then
+  echo "❌ 用法: ./deploy.sh <你的GitHub_Token>"
+  exit 1
+fi
 
-echo "🔨 第1步：构建项目..."
-$NPM run build
+cd "$(dirname "$0")"
+REMOTE="https://${USER}:${TOKEN}@github.com/${USER}/${REPO}.git"
 
-echo "🚀 第2步：部署 dist/ 到 gh-pages 分支..."
-$NPM run deploy
+echo "==> 1/4 构建生产版本..."
+npm run build
+
+echo "==> 2/4 准备部署文件..."
+touch dist/.nojekyll
+
+echo "==> 3/4 推送源码到 main 分支..."
+git add -A
+git commit -m "chore: update $(date '+%Y-%m-%d %H:%M')" || echo "  (无新改动)"
+git push "$REMOTE" main --force
+
+echo "==> 4/4 推送构建产物到 gh-pages 分支..."
+rm -rf /tmp/gh-pages-deploy
+cp -r dist /tmp/gh-pages-deploy
+cd /tmp/gh-pages-deploy
+git init -q
+git config user.name "$USER"
+git config user.email "${USER}@users.noreply.github.com"
+git add -A
+git commit -q -m "deploy $(date '+%Y-%m-%d %H:%M')"
+git branch -M gh-pages
+git push -q "$REMOTE" gh-pages --force
 
 echo ""
 echo "✅ 部署完成！"
-echo "   1. 打开 https://github.com/jiya33/Jiya_work_space/settings/pages"
-echo "   2. Source 选 'Deploy from a branch'"
-echo "   3. Branch 选 'gh-pages'，文件夹选 '/(root)'"
-echo "   4. 等待 1 分钟，访问 https://jiya33.github.io/Jiya_work_space/"
+echo "   访问: https://${USER}.github.io/${REPO}/"
+echo ""
+echo "如果是第一次部署，请到 Settings → Pages"
+echo "把 Source 设为 Deploy from a branch → gh-pages → / (root)"
