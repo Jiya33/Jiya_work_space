@@ -10,10 +10,16 @@ const router = createRouter({
       meta: { title: '今日看板' }
     },
     {
-      path: '/learning-health',
-      name: 'learning-health',
-      component: () => import('../views/LearningHealth.vue'),
-      meta: { title: '学习与健康' }
+      path: '/english',
+      name: 'english',
+      component: () => import('../views/English.vue'),
+      meta: { title: '英语学习' }
+    },
+    {
+      path: '/sport',
+      name: 'sport',
+      component: () => import('../views/Sport.vue'),
+      meta: { title: '运动计划' }
     },
     {
       path: '/finance',
@@ -25,13 +31,7 @@ const router = createRouter({
       path: '/ai-news',
       name: 'ai-news',
       component: () => import('../views/AiNews.vue'),
-      meta: { title: 'AI 产品经理资讯' }
-    },
-    {
-      path: '/shop-side',
-      name: 'shop-side',
-      component: () => import('../views/ShopSide.vue'),
-      meta: { title: '探店副业' }
+      meta: { title: 'AI 资讯' }
     },
     {
       path: '/focus-mode',

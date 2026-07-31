@@ -23,6 +23,18 @@ export interface SportPlan {
   duration: number
 }
 
+/** 运动学习资料（用户自行添加的视频） */
+export interface SportVideo {
+  id?: number
+  title: string
+  category: string       // 游泳 / 肩背 / 臀腿 / 爬坡 / 攀岩 / 其他
+  sourceType: 'link' | 'file'
+  url?: string           // link 模式：B站/YouTube/直链
+  blob?: Blob            // file 模式：本地视频文件
+  note?: string
+  createdAt: string
+}
+
 export interface Expense {
   id?: number
   date: string
@@ -45,13 +57,36 @@ export interface TodoItem {
   createdAt: string
 }
 
+/** RSS 抓取 / 手动录入的资讯条目 */
+export interface NewsItem {
+  id?: number
+  title: string
+  link: string
+  summary: string
+  source: string          // 来源站点名
+  category: string        // 新技术 / 新产品 / 新开源 / 新点子
+  pubDate: string         // ISO
+  isRead: boolean
+  isFavorite: boolean
+  syncedToFeishu?: boolean
+  createdAt: string
+}
+
+/** RSS 订阅源 */
+export interface NewsSource {
+  id: string
+  name: string
+  url: string
+  enabled: boolean
+  builtin: boolean
+}
+
 export interface AppSettings {
   // 飞书配置
   feishuAppId: string
   feishuAppSecret: string
   feishuAppToken: string
   feishuAiNewsTableId: string
-  feishuShopMaterialsTableId: string
   feishuDailyBriefsTableId: string
   // 大模型配置
   llmApiKey: string
@@ -60,29 +95,14 @@ export interface AppSettings {
   sportPlans: SportPlan[]
   // 专注设置
   focusDuration: number
-  // 数据源
-  dataSourceUrl: string
+  focusSoundVolume: number
+  // 资讯源
+  newsSources: NewsSource[]
+  newsLastFetch: string
+  // 腾讯文档快捷入口
+  tencentDocUrl: string
   // 主题
   theme: 'auto' | 'light' | 'dark'
-}
-
-export interface AiNewsRecord {
-  id?: number
-  title: string
-  link: string
-  summary: string
-  category: string
-  createdAt: string
-}
-
-export interface ShopMaterial {
-  id?: number
-  title: string
-  tags: string[]
-  category: string
-  content: string
-  sourceLink: string
-  createdAt: string
 }
 
 export interface DailyBrief {
@@ -91,7 +111,6 @@ export interface DailyBrief {
   title: string
   content: string
   newsCount: number
-  materialCount: number
   createdAt: string
 }
 
@@ -123,4 +142,30 @@ export interface ExpenseStats {
   total: number
   byCategory: Record<string, number>
   daily: { date: string; amount: number }[]
+}
+
+// ====== 英语学习资料 ======
+export interface EnglishLesson {
+  id: string
+  theme: string           // 主题名
+  emoji: string
+  level: '入门' | '进阶' | '高阶'
+  phrases: { en: string; zh: string }[]        // 短语
+  sentences: { en: string; zh: string }[]      // 句子
+  paragraph: { title: string; en: string; zh: string }  // 段落
+  dialogue: { role: string; en: string; zh: string }[]  // 口语练习
+  tips: string[]
+}
+
+// ====== 运动训练资料 ======
+export interface SportGuide {
+  id: string
+  name: string
+  emoji: string
+  intro: string
+  warmup: string[]
+  actions: { name: string; detail: string; sets: string; key: string }[]
+  cooldown: string[]
+  mistakes: string[]
+  refKeyword: string      // 推荐搜索关键词（用于找教学视频）
 }

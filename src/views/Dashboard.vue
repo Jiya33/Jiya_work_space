@@ -38,6 +38,12 @@ const quickImage = ref('')
 const quickImagePreview = ref('')
 const categories: Expense['category'][] = ['餐饮', '购物', '交通', '娱乐', '医疗', '其他']
 
+// 拍照 / 相册 两个入口
+const cameraInput = ref<HTMLInputElement | null>(null)
+const albumInput = ref<HTMLInputElement | null>(null)
+function pickCamera() { cameraInput.value?.click() }
+function pickAlbum() { albumInput.value?.click() }
+
 async function handleImageUpload(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -45,6 +51,7 @@ async function handleImageUpload(e: Event) {
   const compressed = await compressImage(file)
   quickImage.value = compressed
   quickImagePreview.value = compressed
+  input.value = ''
 }
 
 async function submitQuickExpense() {
@@ -227,11 +234,11 @@ onMounted(async () => {
 
     <!-- 快捷入口 -->
     <div class="quick-actions">
-      <button class="quick-action-btn" @click="router.push('/learning-health')">
+      <button class="quick-action-btn" @click="router.push('/english')">
         <span class="qa-icon">📚</span>
         <span class="qa-label">英语打卡</span>
       </button>
-      <button class="quick-action-btn" @click="router.push('/learning-health')">
+      <button class="quick-action-btn" @click="router.push('/sport')">
         <span class="qa-icon">🏃</span>
         <span class="qa-label">今日运动</span>
       </button>
@@ -241,7 +248,7 @@ onMounted(async () => {
       </button>
       <button class="quick-action-btn" @click="router.push('/ai-news')">
         <span class="qa-icon">🔍</span>
-        <span class="qa-label">知识库检索</span>
+        <span class="qa-label">AI 资讯</span>
       </button>
     </div>
 
@@ -278,8 +285,13 @@ onMounted(async () => {
         </div>
 
         <div class="form-group">
-          <label class="form-label">拍照/相册</label>
-          <input type="file" accept="image/*" capture="environment" @change="handleImageUpload" />
+          <label class="form-label">凭证图片</label>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-sm btn-secondary" @click="pickCamera">📷 拍照</button>
+            <button type="button" class="btn btn-sm btn-secondary" @click="pickAlbum">🖼️ 相册</button>
+          </div>
+          <input ref="cameraInput" type="file" accept="image/*" capture="environment" style="display: none;" @change="handleImageUpload" />
+          <input ref="albumInput" type="file" accept="image/*" style="display: none;" @change="handleImageUpload" />
           <img v-if="quickImagePreview" :src="quickImagePreview" style="width: 100%; border-radius: 8px; margin-top: 8px; max-height: 200px; object-fit: cover;" />
         </div>
 

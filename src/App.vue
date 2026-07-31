@@ -10,10 +10,10 @@ const theme = ref<'auto' | 'light' | 'dark'>('auto')
 
 const navItems = [
   { path: '/', label: '今日看板', icon: '📋' },
-  { path: '/learning-health', label: '学习与健康', icon: '📚' },
+  { path: '/english', label: '英语学习', icon: '📚' },
+  { path: '/sport', label: '运动计划', icon: '🏃' },
   { path: '/finance', label: '财务管理', icon: '💰' },
-  { path: '/ai-news', label: 'AI 产品经理资讯', icon: '🤖' },
-  { path: '/shop-side', label: '探店副业', icon: '🏪' },
+  { path: '/ai-news', label: 'AI 资讯', icon: '🤖' },
   { path: '/focus-mode', label: '专注模式', icon: '🎯' },
   { path: '/history', label: '历史归档', icon: '📦' },
   { path: '/settings', label: '设置', icon: '⚙️' }

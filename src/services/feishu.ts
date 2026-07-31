@@ -152,52 +152,6 @@ export const AiNewsAPI = {
     deleteRecord('feishuAiNewsTableId', recordId)
 }
 
-// ====== 业务 API：探店素材 ======
-export const ShopMaterialsAPI = {
-  list: (params?: { pageSize?: number; filter?: string }) =>
-    queryRecords('feishuShopMaterialsTableId', params),
-
-  create: (data: {
-    title: string; tags: string[]; category: string;
-    content: string; sourceLink: string
-  }) =>
-    createRecord('feishuShopMaterialsTableId', {
-      '标题': data.title,
-      '标签': data.tags,
-      '探店分类': data.category,
-      '正文内容': data.content,
-      '来源链接': data.sourceLink,
-      '创建时间': Date.now()
-    }),
-
-  update: (recordId: string, data: Record<string, unknown>) =>
-    updateRecord('feishuShopMaterialsTableId', recordId, data),
-
-  delete: (recordId: string) =>
-    deleteRecord('feishuShopMaterialsTableId', recordId)
-}
-
-// ====== 业务 API：每日简报 ======
-export const DailyBriefsAPI = {
-  list: (params?: { pageSize?: number }) =>
-    queryRecords('feishuDailyBriefsTableId', params),
-
-  create: (data: {
-    title: string; content: string; newsCount: number; materialCount: number
-  }) =>
-    createRecord('feishuDailyBriefsTableId', {
-      '日期': new Date().toISOString().slice(0, 10),
-      '标题': data.title,
-      '内容': data.content,
-      '资讯数': data.newsCount,
-      '素材数': data.materialCount,
-      '创建时间': Date.now()
-    }),
-
-  delete: (recordId: string) =>
-    deleteRecord('feishuDailyBriefsTableId', recordId)
-}
-
 // 获取所有记录（自动翻页）
 export async function fetchAllRecords(
   tableIdKey: string,

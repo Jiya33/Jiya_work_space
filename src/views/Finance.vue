@@ -74,12 +74,29 @@ const formImage = ref('')
 const formImagePreview = ref('')
 const formDate = ref(today())
 
+// 拍照 / 相册 两个入口
+const cameraInput = ref<HTMLInputElement | null>(null)
+const albumInput = ref<HTMLInputElement | null>(null)
+function pickCamera() { cameraInput.value?.click() }
+function pickAlbum() { albumInput.value?.click() }
+
 async function handleImage(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
   if (!file) return
   const compressed = await compressImage(file)
   formImage.value = compressed
   formImagePreview.value = compressed
+  input.value = '' // 允许重复选择同一文件
+}
+
+// 删除单条记录的凭证图片
+async function removeExpenseImage(e: Expense) {
+  if (!confirm('确定删除这张凭证图片？')) return
+  e.imageBase64 = ''
+  await ExpenseDB.update(e)
+  showToast('图片已删除')
+  loadData()
 }
 
 async function addExpense() {
@@ -321,8 +338,9 @@ onMounted(loadData)
 
       <div v-for="e in filteredExpenses" :key="e.id" class="card" style="padding: 12px;">
         <div style="display: flex; gap: 12px;">
-          <div v-if="e.imageBase64" style="width: 60px; height: 60px; flex-shrink: 0; border-radius: 8px; overflow: hidden;">
+          <div v-if="e.imageBase64" style="position: relative; width: 60px; height: 60px; flex-shrink: 0; border-radius: 8px; overflow: hidden;">
             <img :src="e.imageBase64" style="width: 100%; height: 100%; object-fit: cover;" />
+            <button class="img-del-btn" title="删除图片" @click="removeExpenseImage(e)">✕</button>
           </div>
           <div style="flex: 1;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -396,8 +414,13 @@ onMounted(loadData)
           <input v-model="formNote" class="input" placeholder="可选备注" />
         </div>
         <div class="form-group">
-          <label class="form-label">拍照</label>
-          <input type="file" accept="image/*" capture="environment" @change="handleImage" />
+          <label class="form-label">凭证图片</label>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-sm btn-secondary" @click="pickCamera">📷 拍照</button>
+            <button type="button" class="btn btn-sm btn-secondary" @click="pickAlbum">🖼️ 相册</button>
+          </div>
+          <input ref="cameraInput" type="file" accept="image/*" capture="environment" style="display: none;" @change="handleImage" />
+          <input ref="albumInput" type="file" accept="image/*" style="display: none;" @change="handleImage" />
           <img v-if="formImagePreview" :src="formImagePreview" style="width: 100%; border-radius: 8px; margin-top: 8px; max-height: 160px; object-fit: cover;" />
         </div>
         <button class="btn btn-primary btn-block" @click="addExpense">✓ 确认</button>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted, onMounted } from 'vue'
+import { ref, computed, watch, onUnmounted, onMounted } from 'vue'
 import { SettingsDB } from '../services/db'
 
 const focusDuration = ref(25) // minutes
@@ -8,10 +8,9 @@ const isRunning = ref(false)
 const isPaused = ref(false)
 const isFinished = ref(false)
 const showNoise = ref(false)
+const soundVolume = ref(0.6)
 
 let timer: ReturnType<typeof setInterval> | null = null
-let audioCtx: AudioContext | null = null
-let noiseNode: AudioBufferSourceNode | null = null
 
 const displayMinutes = computed(() => Math.floor(timeLeft.value / 60))
 const displaySeconds = computed(() => timeLeft.value % 60)
@@ -20,7 +19,118 @@ const progressPercent = computed(() => {
   return Math.round((1 - timeLeft.value / total) * 100)
 })
 
-import { computed } from 'vue'
+// ====== 火柴 / 柴火燃烧声（Web Audio 合成） ======
+// 低频轰鸣床（棕色噪音低通） + 随机噼啪爆裂（带通短脉冲）
+let audioCtx: AudioContext | null = null
+let fireStop: (() => void) | null = null
+let fireMaster: GainNode | null = null
+let crackleTimer: ReturnType<typeof setTimeout> | null = null
+
+function buildBrownNoiseBuffer(ctx: AudioContext): AudioBuffer {
+  const bufferSize = 2 * ctx.sampleRate
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  let last = 0
+  for (let i = 0; i < bufferSize; i++) {
+    const white = Math.random() * 2 - 1
+    last = (last + 0.02 * white) / 1.02
+    data[i] = last * 3.5
+  }
+  return buffer
+}
+
+function startFire() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    audioCtx = ctx
+    const master = ctx.createGain()
+    master.gain.value = soundVolume.value
+    master.connect(ctx.destination)
+    fireMaster = master
+
+    const noiseBuffer = buildBrownNoiseBuffer(ctx)
+
+    // 低频轰鸣床
+    const bed = ctx.createBufferSource()
+    bed.buffer = noiseBuffer
+    bed.loop = true
+    const bedLp = ctx.createBiquadFilter()
+    bedLp.type = 'lowpass'
+    bedLp.frequency.value = 430
+    const bedGain = ctx.createGain()
+    bedGain.gain.value = 0.55
+    bed.connect(bedLp)
+    bedLp.connect(bedGain)
+    bedGain.connect(master)
+    bed.start()
+
+    let stopped = false
+
+    function scheduleCrackle() {
+      if (stopped) return
+      const now = ctx.currentTime
+      const pops = 1 + Math.floor(Math.random() * 3)
+      for (let p = 0; p < pops; p++) {
+        const at = now + Math.random() * 0.18
+        const pop = ctx.createBufferSource()
+        pop.buffer = noiseBuffer
+        const bp = ctx.createBiquadFilter()
+        bp.type = 'bandpass'
+        bp.frequency.value = 900 + Math.random() * 2600
+        bp.Q.value = 0.9
+        const g = ctx.createGain()
+        const peak = 0.12 + Math.random() * 0.5
+        g.gain.setValueAtTime(0.0001, at)
+        g.gain.linearRampToValueAtTime(peak, at + 0.004)
+        g.gain.exponentialRampToValueAtTime(0.0001, at + 0.035 + Math.random() * 0.06)
+        pop.connect(bp)
+        bp.connect(g)
+        g.connect(master)
+        pop.start(at)
+        pop.stop(at + 0.25)
+      }
+      const next = 100 + Math.random() * 650
+      crackleTimer = setTimeout(scheduleCrackle, next)
+    }
+    crackleTimer = setTimeout(scheduleCrackle, 200)
+
+    fireStop = () => {
+      stopped = true
+      if (crackleTimer) clearTimeout(crackleTimer)
+      try { bed.stop() } catch { /* ignore */ }
+      master.gain.setTargetAtTime(0, ctx.currentTime, 0.12)
+      setTimeout(() => { try { ctx.close() } catch { /* ignore */ } }, 350)
+      fireMaster = null
+    }
+  } catch { /* ignore */ }
+}
+
+function stopFire() {
+  fireStop?.()
+  fireStop = null
+  audioCtx = null
+}
+
+function toggleNoise() {
+  if (showNoise.value) stopFire()
+  else startFire()
+  showNoise.value = !showNoise.value
+}
+
+function onVolumeChange() {
+  if (fireMaster && audioCtx) {
+    fireMaster.gain.setTargetAtTime(soundVolume.value, audioCtx.currentTime, 0.05)
+  }
+  SettingsDB.set('focusSoundVolume', soundVolume.value)
+}
+
+// 实时调整音量：复用已存在 master 节点
+watch(soundVolume, (v) => {
+  if (fireMaster && audioCtx) {
+    fireMaster.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05)
+  }
+  SettingsDB.set('focusSoundVolume', v)
+})
 
 function startTimer() {
   if (isRunning.value) return
@@ -30,9 +140,7 @@ function startTimer() {
   }
   isRunning.value = true
   isPaused.value = false
-
   updateTitle()
-
   timer = setInterval(() => {
     if (timeLeft.value > 0) {
       timeLeft.value--
@@ -56,7 +164,8 @@ function stopTimer() {
   isRunning.value = false
   isPaused.value = false
   if (timer) { clearInterval(timer); timer = null }
-  stopNoise()
+  stopFire()
+  showNoise.value = false
 }
 
 function resetTimer() {
@@ -67,9 +176,7 @@ function resetTimer() {
 }
 
 function notify() {
-  // 震动
   if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200])
-  // 提示音
   try {
     const ctx = new AudioContext()
     const osc = ctx.createOscillator()
@@ -83,52 +190,10 @@ function notify() {
   } catch { /* ignore */ }
 }
 
-// Pink noise
-function toggleNoise() {
-  if (showNoise.value) stopNoise()
-  else startNoise()
-  showNoise.value = !showNoise.value
-}
-
-function startNoise() {
-  try {
-    audioCtx = new AudioContext()
-    const bufferSize = 4096
-    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate)
-    const data = buffer.getChannelData(0)
-    // Pink noise approximation
-    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0
-    for (let i = 0; i < bufferSize; i++) {
-      const white = Math.random() * 2 - 1
-      b0 = 0.99886 * b0 + white * 0.0555179
-      b1 = 0.99332 * b1 + white * 0.0750759
-      b2 = 0.96900 * b2 + white * 0.1538520
-      b3 = 0.86650 * b3 + white * 0.3104856
-      b4 = 0.55000 * b4 + white * 0.5329522
-      b5 = -0.7616 * b5 - white * 0.0168980
-      data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11
-      b6 = white * 0.115926
-    }
-    noiseNode = audioCtx.createBufferSource()
-    noiseNode.buffer = buffer
-    noiseNode.loop = true
-    const gainNode = audioCtx.createGain()
-    gainNode.gain.value = 0.5
-    noiseNode.connect(gainNode)
-    gainNode.connect(audioCtx.destination)
-    noiseNode.start()
-  } catch { /* ignore */ }
-}
-
-function stopNoise() {
-  try { noiseNode?.stop(); audioCtx?.close() } catch { /* ignore */ }
-  noiseNode = null; audioCtx = null
-}
-
 function updateTitle() {
   const m = Math.floor(timeLeft.value / 60)
   const s = timeLeft.value % 60
-  document.title = `⏱ ${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} - 专注中`
+  document.title = `⏱ ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')} - 专注中`
 }
 
 watch(timeLeft, (val) => {
@@ -142,12 +207,13 @@ async function saveDuration() {
 onMounted(async () => {
   const settings = await SettingsDB.get()
   if (settings.focusDuration) focusDuration.value = settings.focusDuration
+  if (typeof settings.focusSoundVolume === 'number') soundVolume.value = settings.focusSoundVolume
   timeLeft.value = focusDuration.value * 60
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
-  stopNoise()
+  stopFire()
   document.title = 'Jiya 智能工作台'
 })
 </script>
@@ -210,14 +276,21 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 白噪音 -->
+    <!-- 柴火燃烧声 -->
     <div class="card">
       <button class="btn btn-block" :class="showNoise ? 'btn-primary' : 'btn-secondary'"
         @click="toggleNoise">
-        {{ showNoise ? '🔊 粉红噪音 开' : '🔇 粉红噪音 关' }}
+        {{ showNoise ? '🔥 柴火噼啪声 开' : '🔇 柴火噼啪声 关' }}
       </button>
-      <p style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
-        粉红噪音有助于提高专注力
+      <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;">
+        <span style="font-size: 13px; color: var(--text-muted);">🔉</span>
+        <input type="range" min="0" max="1" step="0.05" v-model.number="soundVolume"
+          @change="onVolumeChange" style="flex: 1;" />
+        <span style="font-size: 13px; color: var(--text-muted); width: 32px; text-align: right;">{{ Math.round(soundVolume * 100) }}</span>
+        <span style="font-size: 13px; color: var(--text-muted);">🔊</span>
+      </div>
+      <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+        模拟火柴 / 柴火燃烧的噼啪声，比白噪音更让人放松
       </p>
     </div>
 
@@ -227,7 +300,7 @@ onUnmounted(() => {
       <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; text-align: left;">
         🍅 番茄工作法：25分钟专注 + 5分钟休息<br>
         📵 手机静音，关闭通知<br>
-        🎯 明确当前任务目标<br>
+        🔥 听着柴火声，想象自己在篝火旁<br>
         📝 完成后记录完成的任务
       </p>
     </div>
