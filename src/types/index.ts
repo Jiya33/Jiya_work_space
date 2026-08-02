@@ -38,7 +38,8 @@ export interface SportVideo {
 /** 运动类别关联的教程 / 视频链接（可跳转平台 App） */
 export interface SportLink {
   id?: number
-  type: string           // 运动类别，如 游泳 / 肩背 / 臀腿
+  type?: string          // 兼容旧数据：单类别（已废弃，保留用于迁移）
+  types?: string[]       // 可分配到多个运动类别，统一教程库分配使用
   platform: string       // 小红书 / 抖音 / B站 / YouTube / 其他（自动识别）
   url: string
   note?: string

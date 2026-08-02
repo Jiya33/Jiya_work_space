@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted } from 'vue'
+import { ref, onMounted, computed, onUnmounted, provide } from 'vue'
 import { SportDB, SettingsDB, SportVideoDB, SportLinkDB } from '../services/db'
 import { today, formatDate } from '../utils/format'
 import { SPORT_GUIDES, searchLinks, toEmbedUrl } from '../data/sport'
+import { detectPlatform } from '../utils/platform'
+import SportLinkItem from '../components/SportLinkItem.vue'
 import type { SportRecord, SportPlan, SportVideo, SportGuide, SportLink } from '../types'
 
 const toast = ref({ show: false, msg: '', type: 'success' })
@@ -11,8 +13,11 @@ function showToast(msg: string, type = 'success') {
   setTimeout(() => { toast.value.show = false }, 2500)
 }
 
-const activeTab = ref<'plan' | 'guide' | 'video'>('plan')
+const activeTab = ref<'plan' | 'guide' | 'video' | 'library'>('plan')
 const weekdayNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+// 供 SportLinkItem 子组件调用（复制成功提示）
+provide('showToast', showToast)
 const weekOrder = [1, 2, 3, 4, 5, 6, 0]
 
 // ====== 计划与打卡 ======
@@ -196,46 +201,89 @@ async function loadVideos() {
 // ====== 运动类别教程链接 ======
 const sportLinks = ref<SportLink[]>([])
 
-const PLATFORM_ICON: Record<string, string> = {
-  '小红书': '📕', '抖音': '🎵', 'B站': '📺', 'YouTube': '▶️', '其他': '🔗'
-}
-
-function detectPlatform(url: string): string {
-  const u = url.toLowerCase()
-  if (u.includes('xiaohongshu.com') || u.includes('xhslink.com')) return '小红书'
-  if (u.includes('douyin.com') || u.includes('v.douyin.com') || u.includes('iesdouyin')) return '抖音'
-  if (u.includes('bilibili.com') || u.includes('b23.tv')) return 'B站'
-  if (u.includes('youtube.com') || u.includes('youtu.be')) return 'YouTube'
-  return '其他'
-}
-
 function linksFor(type: string): SportLink[] {
-  return sportLinks.value.filter(l => l.type === type)
+  return sportLinks.value.filter(l =>
+    (l.types && l.types.includes(type)) || (!l.types && l.type === type)
+  )
 }
 
 const showLinkForm = ref(false)
+const editingLink = ref<SportLink | null>(null)
 const linkType = ref('游泳')
+const linkTypes = ref<string[]>(['游泳'])
 const linkUrl = ref('')
 const linkNote = ref('')
 
 function openLinkForm(type: string) {
+  editingLink.value = null
   linkType.value = type
+  linkTypes.value = [type]
   linkUrl.value = ''
   linkNote.value = ''
   showLinkForm.value = true
 }
 
+// 编辑已有链接：预填表单
+function openLinkEditor(l: SportLink) {
+  editingLink.value = l
+  linkTypes.value = l.types && l.types.length ? [...l.types] : (l.type ? [l.type] : [])
+  linkUrl.value = l.url
+  linkNote.value = l.note || ''
+  showLinkForm.value = true
+}
+
+function closeLinkForm() {
+  showLinkForm.value = false
+  editingLink.value = null
+}
+
+function toggleLinkType(t: string) {
+  const i = linkTypes.value.indexOf(t)
+  if (i >= 0) linkTypes.value.splice(i, 1)
+  else linkTypes.value.push(t)
+}
+
+// 从粘贴文本中提取首个有效 URL（处理「复制打开抖音」等分享文案）
+function extractUrl(raw: string): string {
+  // 匹配 http(s):// 开头的 URL
+  const m = raw.match(/https?:\/\/[^\s<>"\u4e00-\u9fa5]+/)
+  return m ? m[0] : raw.trim()
+}
+
+// 从分享文本中提取简短标题（如：你们催的 一亿播放的手臂塑形全程跟练版）
+function extractTitle(raw: string): string {
+  // 去掉 URL 后，尝试提取【】或前后文中的标题
+  let txt = raw.replace(/https?:\/\/\S+/g, '').trim()
+  const m = txt.match(/【(.+?)】/)
+  if (m) return m[1].trim()
+  // 取前 40 字作为摘要
+  return txt.length > 40 ? txt.slice(0, 40) + '…' : txt
+}
+
 async function saveLink() {
   if (!linkUrl.value.trim()) { showToast('请输入链接地址', 'error'); return }
-  await SportLinkDB.add({
-    type: linkType.value,
-    platform: detectPlatform(linkUrl.value),
-    url: linkUrl.value.trim(),
-    note: linkNote.value.trim(),
-    createdAt: new Date().toISOString()
-  })
-  showToast('链接已添加')
+  if (linkTypes.value.length === 0) { showToast('请至少选择一个运动类别', 'error'); return }
+  const rawUrl = linkUrl.value.trim()
+  const url = extractUrl(rawUrl)
+  // 如果没填备注，自动从分享文本提取标题
+  const note = linkNote.value.trim() || (rawUrl !== url ? extractTitle(rawUrl) : '')
+  const payload = {
+    types: [...linkTypes.value],
+    type: linkTypes.value[0],
+    platform: detectPlatform(url),
+    url,
+    note,
+    createdAt: editingLink.value ? editingLink.value.createdAt : new Date().toISOString()
+  }
+  if (editingLink.value) {
+    await SportLinkDB.update({ ...payload, id: editingLink.value.id! })
+    showToast('已更新')
+  } else {
+    await SportLinkDB.add(payload)
+    showToast('链接已添加')
+  }
   showLinkForm.value = false
+  editingLink.value = null
   loadLinks()
 }
 
@@ -245,10 +293,29 @@ async function deleteLink(id: number) {
   loadLinks()
 }
 
+// 教程库：切换某条链接所属的运动类别（分配 / 取消分配）
+async function toggleLinkCat(l: SportLink, t: string) {
+  const arr = l.types ? [...l.types] : (l.type ? [l.type] : [])
+  const i = arr.indexOf(t)
+  if (i >= 0) arr.splice(i, 1)
+  else arr.push(t)
+  if (arr.length === 0) { showToast('至少保留一个类别', 'error'); return }
+  const updated = { ...l, types: arr, type: arr[0] }
+  await SportLinkDB.update(updated)
+  l.types = arr
+  l.type = arr[0]
+  showToast('已更新分配')
+}
+
 async function loadLinks() {
-  sportLinks.value = (await SportLinkDB.getAll()).sort(
+  const raw = (await SportLinkDB.getAll()).sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   )
+  // 旧数据兼容：单类别 type 归一化为 types 数组（仅在内存中，不重写数据库）
+  sportLinks.value = raw.map(l => ({
+    ...l,
+    types: l.types && l.types.length ? l.types : (l.type ? [l.type] : [])
+  }))
 }
 
 onMounted(() => {
@@ -271,6 +338,7 @@ onUnmounted(() => {
       <button class="tab-item" :class="{ active: activeTab === 'plan' }" @click="activeTab = 'plan'">📋 计划打卡</button>
       <button class="tab-item" :class="{ active: activeTab === 'guide' }" @click="activeTab = 'guide'">📖 训练资料</button>
       <button class="tab-item" :class="{ active: activeTab === 'video' }" @click="activeTab = 'video'">🎬 视频库</button>
+      <button class="tab-item" :class="{ active: activeTab === 'library' }" @click="activeTab = 'library'">📚 教程库</button>
     </div>
 
     <!-- ══════════ 计划与打卡 ══════════ -->
@@ -294,15 +362,8 @@ onUnmounted(() => {
             <span style="font-size: 12px; color: var(--text-muted);">📎 {{ todayPlan.type }} · 教程链接（点击跳转）</span>
             <button class="btn btn-sm btn-secondary" @click="openLinkForm(todayPlan.type)">+ 添加</button>
           </div>
-          <a v-for="l in linksFor(todayPlan.type)" :key="l.id" :href="l.url" target="_blank" rel="noopener"
-            class="link-chip">
-            <span class="link-ic">{{ PLATFORM_ICON[l.platform] }}</span>
-            <span class="link-txt">
-              <b>{{ l.platform }}</b>
-              <i v-if="l.note">{{ l.note }}</i>
-            </span>
-            <button class="link-del" title="删除" @click.prevent="deleteLink(l.id!)">✕</button>
-          </a>
+          <SportLinkItem v-for="l in linksFor(todayPlan.type)" :key="l.id"
+            :link="l" @delete="deleteLink" @edit="openLinkEditor" />
           <div v-if="linksFor(todayPlan.type).length === 0" style="font-size: 12px; color: var(--text-muted);">
             还没有教程链接，添加小红书 / 抖音 / B站 的教学，手机上点一下即跳转对应 App。
           </div>
@@ -452,16 +513,8 @@ onUnmounted(() => {
             <span>📎 {{ currentGuide.name }} · 教程链接</span>
             <button class="btn btn-sm btn-primary" @click="openLinkForm(currentGuide.name)">+ 添加</button>
           </div>
-          <a v-for="l in linksFor(currentGuide.name)" :key="l.id" :href="l.url" target="_blank" rel="noopener"
-            class="link-chip">
-            <span class="link-ic">{{ PLATFORM_ICON[l.platform] }}</span>
-            <span class="link-txt">
-              <b>{{ l.platform }}</b>
-              <i v-if="l.note">{{ l.note }}</i>
-              <i v-else>{{ l.url }}</i>
-            </span>
-            <button class="link-del" title="删除" @click.prevent="deleteLink(l.id!)">✕</button>
-          </a>
+          <SportLinkItem v-for="l in linksFor(currentGuide.name)" :key="l.id"
+            :link="l" @delete="deleteLink" @edit="openLinkEditor" />
           <div v-if="linksFor(currentGuide.name).length === 0" style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
             还没有该项目的教程链接。添加小红书 / 抖音 / B站 的教学视频或图文，手机上点一下即可跳转对应 App。
           </div>
@@ -635,18 +688,46 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 添加教程链接弹窗 -->
-    <div v-if="showLinkForm" class="modal-overlay" @click.self="showLinkForm = false">
+    <!-- ══════════ 统一教程库 ══════════ -->
+    <div v-if="activeTab === 'library'">
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>📚 教程库（{{ sportLinks.length }}）</span>
+          <button class="btn btn-sm btn-primary" @click="openLinkForm('游泳')">+ 添加</button>
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+          集中管理你从各平台收集的教程。每条可分配（打标签）给多个运动类别，自动出现在对应项目与今日计划里；手机上点击即可跳转对应 App。
+        </p>
+      </div>
+
+      <div v-if="sportLinks.length === 0" class="empty-state">
+        <div style="font-size: 40px;">📚</div>
+        <div>教程库还是空的</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">点右上角「+ 添加」收集小红书 / 抖音 / B站 教程</div>
+      </div>
+
+      <div v-for="l in sportLinks" :key="l.id" class="card">
+        <SportLinkItem :link="l" @delete="deleteLink" @edit="openLinkEditor" />
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px;">
+          <button v-for="t in sportTypes" :key="t" class="btn btn-sm"
+            :class="(l.types || []).includes(t) ? 'btn-primary' : 'btn-secondary'"
+            @click="toggleLinkCat(l, t)">{{ t }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 添加 / 编辑教程链接弹窗 -->
+    <div v-if="showLinkForm" class="modal-overlay" @click.self="closeLinkForm">
       <div class="modal">
         <div class="modal-header">
-          <h3>📎 添加教程链接</h3>
-          <button class="modal-close" @click="showLinkForm = false">✕</button>
+          <h3>{{ editingLink ? '✏️ 编辑教程链接' : '📎 添加教程链接' }}</h3>
+          <button class="modal-close" @click="closeLinkForm">✕</button>
         </div>
         <div class="form-group">
-          <label class="form-label">所属运动类别</label>
+          <label class="form-label">分配运动类别（可多选，会同时出现在各项目下）</label>
           <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             <button v-for="t in sportTypes" :key="t" class="btn btn-sm"
-              :class="linkType === t ? 'btn-primary' : 'btn-secondary'" @click="linkType = t">{{ t }}</button>
+              :class="linkTypes.includes(t) ? 'btn-primary' : 'btn-secondary'" @click="toggleLinkType(t)">{{ t }}</button>
           </div>
         </div>
         <div class="form-group">

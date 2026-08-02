@@ -180,6 +180,7 @@ export const SportLinkDB = {
   getAll: () => getAll<SportLink>('sport_links'),
   getByType: (type: string) => getByIndex<SportLink>('sport_links', 'type', type),
   add: (link: Omit<SportLink, 'id'>) => add('sport_links', link),
+  update: (link: SportLink) => put('sport_links', link),
   delete: (id: number) => remove('sport_links', id)
 }
 
