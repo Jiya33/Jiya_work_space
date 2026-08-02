@@ -53,6 +53,27 @@ export function getMonthRange(dateStr?: string): { start: string; end: string } 
   }
 }
 
+export function getQuarterRange(dateStr?: string): { start: string; end: string } {
+  const d = dateStr ? new Date(dateStr) : new Date()
+  const q = Math.floor(d.getMonth() / 3)
+  const start = new Date(d.getFullYear(), q * 3, 1)
+  const end = new Date(d.getFullYear(), q * 3 + 3, 0)
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10)
+  }
+}
+
+export function getYearRange(dateStr?: string): { start: string; end: string } {
+  const d = dateStr ? new Date(dateStr) : new Date()
+  const start = new Date(d.getFullYear(), 0, 1)
+  const end = new Date(d.getFullYear(), 11, 31)
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10)
+  }
+}
+
 export function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate()
 }

@@ -35,6 +35,16 @@ export interface SportVideo {
   createdAt: string
 }
 
+/** 运动类别关联的教程 / 视频链接（可跳转平台 App） */
+export interface SportLink {
+  id?: number
+  type: string           // 运动类别，如 游泳 / 肩背 / 臀腿
+  platform: string       // 小红书 / 抖音 / B站 / YouTube / 其他（自动识别）
+  url: string
+  note?: string
+  createdAt: string
+}
+
 export interface Expense {
   id?: number
   date: string
@@ -42,6 +52,7 @@ export interface Expense {
   category: '餐饮' | '购物' | '交通' | '娱乐' | '医疗' | '其他'
   note: string
   imageBase64: string
+  type?: 'expense' | 'income'  // 收支类型：缺省视为支出（兼容旧数据）
   createdAt: string
 }
 
@@ -91,6 +102,7 @@ export interface AppSettings {
   // 大模型配置
   llmApiKey: string
   llmProvider: 'deepseek' | 'siliconflow' | 'lingyi' | 'none'
+  llmModel?: string        // 具体模型名；为空时回退到厂商默认模型
   // 运动计划
   sportPlans: SportPlan[]
   // 专注设置
@@ -145,16 +157,32 @@ export interface ExpenseStats {
 }
 
 // ====== 英语学习资料 ======
+export interface EnglishItem { en: string; zh: string }
+export interface EnglishParagraph { title: string; en: string; zh: string }
+export interface EnglishDialogueLine { role: string; en: string; zh: string }
+
 export interface EnglishLesson {
   id: string
   theme: string           // 主题名
   emoji: string
   level: '入门' | '进阶' | '高阶'
-  phrases: { en: string; zh: string }[]        // 短语
-  sentences: { en: string; zh: string }[]      // 句子
-  paragraph: { title: string; en: string; zh: string }  // 段落
-  dialogue: { role: string; en: string; zh: string }[]  // 口语练习
+  desc?: string           // 单元描述 / 适用场景
+  custom?: boolean        // 是否为用户自建单元
+  createdAt?: string
+  phrases: EnglishItem[]              // 短语池（分批展示，可刷新）
+  sentences: EnglishItem[]            // 句子池（分批展示，可刷新）
+  paragraphs: EnglishParagraph[]      // 段落池（可刷新换一篇）
+  dialogues: EnglishDialogueLine[][]  // 口语练习池（可刷新换一段）
   tips: string[]
+}
+
+/** 英语每日打卡（四个学习块全部 100% 完成才记一次） */
+export interface EnglishCheckIn {
+  id?: number
+  date: string            // YYYY-MM-DD
+  lessonId: string
+  lessonTheme: string
+  createdAt: string
 }
 
 // ====== 运动训练资料 ======

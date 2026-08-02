@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted } from 'vue'
-import { SportDB, SettingsDB, SportVideoDB } from '../services/db'
+import { SportDB, SettingsDB, SportVideoDB, SportLinkDB } from '../services/db'
 import { today, formatDate } from '../utils/format'
 import { SPORT_GUIDES, searchLinks, toEmbedUrl } from '../data/sport'
-import type { SportRecord, SportPlan, SportVideo, SportGuide } from '../types'
+import type { SportRecord, SportPlan, SportVideo, SportGuide, SportLink } from '../types'
 
 const toast = ref({ show: false, msg: '', type: 'success' })
 function showToast(msg: string, type = 'success') {
@@ -193,9 +193,68 @@ async function loadVideos() {
   )
 }
 
+// ====== 运动类别教程链接 ======
+const sportLinks = ref<SportLink[]>([])
+
+const PLATFORM_ICON: Record<string, string> = {
+  '小红书': '📕', '抖音': '🎵', 'B站': '📺', 'YouTube': '▶️', '其他': '🔗'
+}
+
+function detectPlatform(url: string): string {
+  const u = url.toLowerCase()
+  if (u.includes('xiaohongshu.com') || u.includes('xhslink.com')) return '小红书'
+  if (u.includes('douyin.com') || u.includes('v.douyin.com') || u.includes('iesdouyin')) return '抖音'
+  if (u.includes('bilibili.com') || u.includes('b23.tv')) return 'B站'
+  if (u.includes('youtube.com') || u.includes('youtu.be')) return 'YouTube'
+  return '其他'
+}
+
+function linksFor(type: string): SportLink[] {
+  return sportLinks.value.filter(l => l.type === type)
+}
+
+const showLinkForm = ref(false)
+const linkType = ref('游泳')
+const linkUrl = ref('')
+const linkNote = ref('')
+
+function openLinkForm(type: string) {
+  linkType.value = type
+  linkUrl.value = ''
+  linkNote.value = ''
+  showLinkForm.value = true
+}
+
+async function saveLink() {
+  if (!linkUrl.value.trim()) { showToast('请输入链接地址', 'error'); return }
+  await SportLinkDB.add({
+    type: linkType.value,
+    platform: detectPlatform(linkUrl.value),
+    url: linkUrl.value.trim(),
+    note: linkNote.value.trim(),
+    createdAt: new Date().toISOString()
+  })
+  showToast('链接已添加')
+  showLinkForm.value = false
+  loadLinks()
+}
+
+async function deleteLink(id: number) {
+  if (!confirm('确定删除这个链接？')) return
+  await SportLinkDB.delete(id)
+  loadLinks()
+}
+
+async function loadLinks() {
+  sportLinks.value = (await SportLinkDB.getAll()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )
+}
+
 onMounted(() => {
   loadSport()
   loadVideos()
+  loadLinks()
 })
 
 onUnmounted(() => {
@@ -228,6 +287,25 @@ onUnmounted(() => {
         </div>
         <div v-else style="font-size: 13px; color: var(--text-muted); line-height: 1.6;">
           今天（{{ weekdayNames[currentWeekday] }}）没有安排运动，休息日也是训练的一部分 💤
+        </div>
+
+        <div v-if="todayPlan" style="margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 12px; color: var(--text-muted);">📎 {{ todayPlan.type }} · 教程链接（点击跳转）</span>
+            <button class="btn btn-sm btn-secondary" @click="openLinkForm(todayPlan.type)">+ 添加</button>
+          </div>
+          <a v-for="l in linksFor(todayPlan.type)" :key="l.id" :href="l.url" target="_blank" rel="noopener"
+            class="link-chip">
+            <span class="link-ic">{{ PLATFORM_ICON[l.platform] }}</span>
+            <span class="link-txt">
+              <b>{{ l.platform }}</b>
+              <i v-if="l.note">{{ l.note }}</i>
+            </span>
+            <button class="link-del" title="删除" @click.prevent="deleteLink(l.id!)">✕</button>
+          </a>
+          <div v-if="linksFor(todayPlan.type).length === 0" style="font-size: 12px; color: var(--text-muted);">
+            还没有教程链接，添加小红书 / 抖音 / B站 的教学，手机上点一下即跳转对应 App。
+          </div>
         </div>
       </div>
 
@@ -367,6 +445,26 @@ onUnmounted(() => {
           <button class="btn btn-sm btn-primary" @click="quickCheckIn(currentGuide.name, 40)">✓ 完成打卡 40min</button>
           <a class="btn btn-sm btn-secondary" :href="guideLinks.bilibili" target="_blank">📺 B站教学</a>
           <a class="btn btn-sm btn-secondary" :href="guideLinks.youtube" target="_blank">▶️ YouTube</a>
+        </div>
+
+        <div class="card" style="margin-top: 12px;">
+          <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📎 {{ currentGuide.name }} · 教程链接</span>
+            <button class="btn btn-sm btn-primary" @click="openLinkForm(currentGuide.name)">+ 添加</button>
+          </div>
+          <a v-for="l in linksFor(currentGuide.name)" :key="l.id" :href="l.url" target="_blank" rel="noopener"
+            class="link-chip">
+            <span class="link-ic">{{ PLATFORM_ICON[l.platform] }}</span>
+            <span class="link-txt">
+              <b>{{ l.platform }}</b>
+              <i v-if="l.note">{{ l.note }}</i>
+              <i v-else>{{ l.url }}</i>
+            </span>
+            <button class="link-del" title="删除" @click.prevent="deleteLink(l.id!)">✕</button>
+          </a>
+          <div v-if="linksFor(currentGuide.name).length === 0" style="font-size: 12px; color: var(--text-muted); line-height: 1.6;">
+            还没有该项目的教程链接。添加小红书 / 抖音 / B站 的教学视频或图文，手机上点一下即可跳转对应 App。
+          </div>
         </div>
       </div>
 
@@ -534,6 +632,35 @@ onUnmounted(() => {
 
           <button class="btn btn-primary btn-block" @click="saveVideo">💾 保存</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 添加教程链接弹窗 -->
+    <div v-if="showLinkForm" class="modal-overlay" @click.self="showLinkForm = false">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>📎 添加教程链接</h3>
+          <button class="modal-close" @click="showLinkForm = false">✕</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label">所属运动类别</label>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button v-for="t in sportTypes" :key="t" class="btn btn-sm"
+              :class="linkType === t ? 'btn-primary' : 'btn-secondary'" @click="linkType = t">{{ t }}</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">链接地址 *</label>
+          <input v-model="linkUrl" class="input" placeholder="小红书 / 抖音 / B站 视频或教程链接" />
+          <p v-if="linkUrl.trim()" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            识别为：{{ detectPlatform(linkUrl) }}（手机端点击将尝试跳转对应 App）
+          </p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">备注（可选）</label>
+          <input v-model="linkNote" class="input" placeholder="如：跟练第 3 周 / 标准动作示范" />
+        </div>
+        <button class="btn btn-primary btn-block" @click="saveLink">💾 保存</button>
       </div>
     </div>
   </div>

@@ -40,12 +40,6 @@ const router = createRouter({
       meta: { title: '专注模式' }
     },
     {
-      path: '/history',
-      name: 'history',
-      component: () => import('../views/HistoryArchive.vue'),
-      meta: { title: '历史归档' }
-    },
-    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),

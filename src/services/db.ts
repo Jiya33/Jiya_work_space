@@ -1,11 +1,11 @@
 // ====== IndexedDB 封装工具类 ======
 import type {
   LearningRecord, SportRecord, Expense, TodoItem,
-  AppSettings, NewsItem, SportVideo
+  AppSettings, NewsItem, SportVideo, SportLink, EnglishLesson, EnglishCheckIn
 } from '../types'
 
 const DB_NAME = 'jiya_workbench'
-const DB_VERSION = 2
+const DB_VERSION = 4
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -40,6 +40,19 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('sport_videos')) {
         const store = db.createObjectStore('sport_videos', { keyPath: 'id', autoIncrement: true })
         store.createIndex('category', 'category', { unique: false })
+      }
+      // v3 新增：自定义英语单元 + 英语每日打卡
+      if (!db.objectStoreNames.contains('english_lessons')) {
+        db.createObjectStore('english_lessons', { keyPath: 'id' })
+      }
+      if (!db.objectStoreNames.contains('english_checkins')) {
+        const store = db.createObjectStore('english_checkins', { keyPath: 'id', autoIncrement: true })
+        store.createIndex('date', 'date', { unique: false })
+      }
+      // v4 新增：运动类别教程链接
+      if (!db.objectStoreNames.contains('sport_links')) {
+        const store = db.createObjectStore('sport_links', { keyPath: 'id', autoIncrement: true })
+        store.createIndex('type', 'type', { unique: false })
       }
     }
     request.onsuccess = () => resolve(request.result)
@@ -129,6 +142,22 @@ export const LearningDB = {
   update: (record: LearningRecord) => put('learning_records', record)
 }
 
+// 自定义英语学习单元
+export const EnglishLessonDB = {
+  getAll: () => getAll<EnglishLesson>('english_lessons'),
+  add: (lesson: EnglishLesson) => put('english_lessons', lesson),
+  update: (lesson: EnglishLesson) => put('english_lessons', lesson),
+  delete: (id: string) => remove('english_lessons', id)
+}
+
+// 英语每日打卡（100% 完成才写入）
+export const EnglishCheckInDB = {
+  getAll: () => getAll<EnglishCheckIn>('english_checkins'),
+  getByDate: (date: string) => getByIndex<EnglishCheckIn>('english_checkins', 'date', date),
+  add: (item: Omit<EnglishCheckIn, 'id'>) => add('english_checkins', item),
+  delete: (id: number) => remove('english_checkins', id)
+}
+
 // 运动记录
 export const SportDB = {
   getAll: () => getAll<SportRecord>('sport_records'),
@@ -144,6 +173,14 @@ export const SportVideoDB = {
   add: (v: Omit<SportVideo, 'id'>) => add('sport_videos', v),
   delete: (id: number) => remove('sport_videos', id),
   update: (v: SportVideo) => put('sport_videos', v)
+}
+
+// 运动类别教程链接
+export const SportLinkDB = {
+  getAll: () => getAll<SportLink>('sport_links'),
+  getByType: (type: string) => getByIndex<SportLink>('sport_links', 'type', type),
+  add: (link: Omit<SportLink, 'id'>) => add('sport_links', link),
+  delete: (id: number) => remove('sport_links', id)
 }
 
 // 账单

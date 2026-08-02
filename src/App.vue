@@ -2,11 +2,12 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { SettingsDB } from './services/db'
+import { theme } from './composables/theme'
+import AiAssistant from './components/AiAssistant.vue'
 
 const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
-const theme = ref<'auto' | 'light' | 'dark'>('auto')
 
 const navItems = [
   { path: '/', label: '今日看板', icon: '📋' },
@@ -15,7 +16,6 @@ const navItems = [
   { path: '/finance', label: '财务管理', icon: '💰' },
   { path: '/ai-news', label: 'AI 资讯', icon: '🤖' },
   { path: '/focus-mode', label: '专注模式', icon: '🎯' },
-  { path: '/history', label: '历史归档', icon: '📦' },
   { path: '/settings', label: '设置', icon: '⚙️' }
 ]
 
@@ -108,6 +108,9 @@ onMounted(async () => {
       <div class="page-body">
         <router-view />
       </div>
+
+      <!-- 全局 AI 助手（所有页面可用） -->
+      <AiAssistant />
     </div>
   </div>
 </template>

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { SettingsDB } from '../services/db'
 import { verifyFeishuConfig, clearFeishuToken } from '../services/feishu'
 import { BUILTIN_SOURCES } from '../services/news'
+import { PROVIDER_MODELS, testLlm } from '../services/llm'
+import { theme, type ThemeMode } from '../composables/theme'
 import type { AppSettings, NewsSource } from '../types'
 
 const toast = ref({ show: false, msg: '', type: 'success' })
@@ -11,7 +13,7 @@ function showToast(msg: string, type = 'success') {
   setTimeout(() => { toast.value.show = false }, 2000)
 }
 
-// 飞书配置
+// ====== 知识库设置：飞书 ======
 const feishuAppId = ref('')
 const feishuAppSecret = ref('')
 const feishuAppToken = ref('')
@@ -54,17 +56,81 @@ async function testFeishu() {
   }
 }
 
-// 大模型配置
+// ====== 知识库设置：腾讯文档 / 通用知识库入口 ======
+const tencentDocUrl = ref('')
+
+async function saveTencentDoc() {
+  await SettingsDB.set('tencentDocUrl', tencentDocUrl.value.trim())
+  showToast('知识库入口已保存')
+}
+
+// ====== 模型设置 ======
 const llmApiKey = ref('')
 const llmProvider = ref<AppSettings['llmProvider']>('none')
+const llmModel = ref('')          // 生效模型（可能为用户自定义）
+const llmCustomModel = ref('')    // 自定义模型名（当所选不在预设列表时）
+
+const presetModels = computed(() => PROVIDER_MODELS[llmProvider.value] || [])
+const isCustomModel = computed(() =>
+  !!llmModel.value && !presetModels.value.some(p => p.value === llmModel.value)
+)
+// 下拉框绑定：预设模型或「__custom__」
+const modelSelect = computed<string>({
+  get() {
+    return isCustomModel.value ? '__custom__' : llmModel.value
+  },
+  set(v: string) {
+    if (v === '__custom__') {
+      llmModel.value = llmCustomModel.value
+    } else {
+      llmModel.value = v
+      llmCustomModel.value = ''
+    }
+  }
+})
+// 当前生效模型展示名
+const effectiveModelLabel = computed(() => {
+  if (llmProvider.value === 'none') return '—'
+  const m = llmModel.value
+  if (!m) return presetModels.value[0]?.value || '—'
+  const found = presetModels.value.find(p => p.value === m)
+  return found ? found.value : m
+})
+
+// 切换服务商时，若当前模型不在新厂商预设里则回退到第一个预设
+watch(llmProvider, (p) => {
+  const presets = PROVIDER_MODELS[p] || []
+  if (!presets.some(x => x.value === llmModel.value)) {
+    llmModel.value = presets.length ? presets[0].value : ''
+  }
+  llmCustomModel.value = ''
+  llmStatus.value = { state: 'idle', msg: '' }
+})
+function onCustomInput() {
+  llmModel.value = llmCustomModel.value
+}
 
 async function saveLLM() {
   await SettingsDB.setSecret('llmApiKey', llmApiKey.value)
   await SettingsDB.set('llmProvider', llmProvider.value)
-  showToast('大模型配置已保存')
+  await SettingsDB.set('llmModel', llmModel.value || '')
+  showToast('模型配置已保存')
 }
 
-// 资讯源管理
+const llmStatus = ref<{ state: 'idle' | 'testing' | 'success' | 'error'; model?: string; msg: string }>({ state: 'idle', msg: '' })
+async function testLLM() {
+  await saveLLM()
+  llmStatus.value = { state: 'testing', msg: '正在测试连接...' }
+  try {
+    const r = await testLlm()
+    if (r.ok) llmStatus.value = { state: 'success', model: r.model, msg: `连接成功，当前生效模型：${r.model}` }
+    else llmStatus.value = { state: 'error', msg: r.error || '测试失败' }
+  } catch (e: any) {
+    llmStatus.value = { state: 'error', msg: e.message || '测试失败' }
+  }
+}
+
+// ====== 资料资源设置：AI 资讯源 ======
 const newsSources = ref<NewsSource[]>([])
 const customSourceName = ref('')
 const customSourceUrl = ref('')
@@ -105,21 +171,26 @@ function removeSource(id: string) {
   saveNewsSources()
 }
 
-// 腾讯文档快捷入口
-const tencentDocUrl = ref('')
-
-async function saveTencentDoc() {
-  await SettingsDB.set('tencentDocUrl', tencentDocUrl.value.trim())
-  showToast('已保存腾讯文档入口')
+// ====== 外观设置 ======
+const themeOptions: { value: ThemeMode; label: string }[] = [
+  { value: 'auto', label: '🌓 跟随系统' },
+  { value: 'light', label: '☀️ 浅色' },
+  { value: 'dark', label: '🌙 深色' }
+]
+function setTheme(t: ThemeMode) {
+  theme.value = t
+  SettingsDB.set('theme', t)
+  showToast('外观已更新')
 }
 
-// 数据管理
+// ====== 数据管理 ======
 async function exportAllData() {
   const settings = await SettingsDB.get()
-  const learningRecords = await (await import('../services/db')).LearningDB.getAll()
-  const sportRecords = await (await import('../services/db')).SportDB.getAll()
-  const expenses = await (await import('../services/db')).ExpenseDB.getAll()
-  const todos = await (await import('../services/db')).TodoDB.getAll()
+  const { LearningDB, SportDB, ExpenseDB, TodoDB } = await import('../services/db')
+  const learningRecords = await LearningDB.getAll()
+  const sportRecords = await SportDB.getAll()
+  const expenses = await ExpenseDB.getAll()
+  const todos = await TodoDB.getAll()
 
   // 去除敏感图片 base64
   const cleanExpenses = expenses.map(e => ({ ...e, imageBase64: e.imageBase64 ? '[图片数据]' : '' }))
@@ -155,7 +226,6 @@ async function importData(e: Event) {
 
 async function clearAllData() {
   if (!confirm('⚠️ 确定清除所有本地数据？此操作不可撤销！')) return
-  // Clear IndexedDB by deleting the database
   return new Promise<void>((resolve) => {
     const req = indexedDB.deleteDatabase('jiya_workbench')
     req.onsuccess = () => {
@@ -176,12 +246,17 @@ async function loadSettings() {
   feishuAppToken.value = await SettingsDB.getSecret('feishuAppToken')
   feishuAiNewsTableId.value = await SettingsDB.getSecret('feishuAiNewsTableId')
   feishuDailyBriefsTableId.value = await SettingsDB.getSecret('feishuDailyBriefsTableId')
+  tencentDocUrl.value = (s.tencentDocUrl as string) || ''
   llmApiKey.value = await SettingsDB.getSecret('llmApiKey')
   llmProvider.value = (s.llmProvider as AppSettings['llmProvider']) || 'none'
+  llmModel.value = (s.llmModel as string) || ''
+  const presets = PROVIDER_MODELS[llmProvider.value] || []
+  if (llmModel.value && !presets.some(p => p.value === llmModel.value)) {
+    llmCustomModel.value = llmModel.value
+  }
   newsSources.value = (s.newsSources as NewsSource[] | undefined)?.length
     ? (s.newsSources as NewsSource[])
     : BUILTIN_SOURCES.map(x => ({ ...x }))
-  tencentDocUrl.value = (s.tencentDocUrl as string) || ''
 }
 
 onMounted(loadSettings)
@@ -192,13 +267,13 @@ onMounted(loadSettings)
     <div v-if="toast.show" class="toast" :class="toast.type">{{ toast.msg }}</div>
 
     <!-- 安全提示 -->
-    <div class="card" style="border-left: 4px solid var(--warning); background: #FFF8E1;">
+    <div class="card" style="border-left: 4px solid var(--warning); background: var(--warn-bg);">
       <div style="display: flex; gap: 8px; align-items: flex-start;">
         <span style="font-size: 20px;">⚠️</span>
         <div>
-          <div style="font-size: 14px; font-weight: 600; color: #E65100;">安全提示</div>
+          <div style="font-size: 14px; font-weight: 600; color: var(--warn-text);">安全提示</div>
           <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.5;">
-            飞书 App Secret 和大模型 API Key 将存储在浏览器本地。
+            飞书 App Secret 和大模型 API Key 会经过简单混淆后存储在浏览器本地。
             此方案仅适用于个人使用/私有部署场景。建议创建<b>仅限本人使用的飞书企业自建应用</b>，
             并授予最小权限（仅操作指定多维表格）。代码中不做任何云端日志上报。
           </p>
@@ -206,9 +281,10 @@ onMounted(loadSettings)
       </div>
     </div>
 
-    <!-- ====== 飞书配置 ====== -->
+    <!-- ====== 知识库设置 ====== -->
     <div class="card">
-      <div class="card-title">🪶 飞书知识库配置</div>
+      <div class="card-title">🪶 知识库设置 · 飞书多维表格</div>
+      <p class="set-hint">配置后，可在「AI 资讯」中将内容转存到飞书多维表格归档。</p>
 
       <div class="form-group">
         <label class="form-label">App ID</label>
@@ -241,15 +317,38 @@ onMounted(loadSettings)
         </button>
       </div>
 
-      <div v-if="feishuStatus !== 'idle'" style="margin-top: 8px; font-size: 13px;"
-        :style="{ color: feishuStatus === 'success' ? 'var(--success)' : feishuStatus === 'error' ? 'var(--danger)' : 'var(--text-secondary)' }">
-        {{ feishuTesting ? '⏳' : feishuStatus === 'success' ? '✅' : '❌' }} {{ feishuStatusMsg }}
+      <div v-if="feishuStatus !== 'idle'" class="model-status" :class="feishuStatus">
+        {{ feishuStatus === 'testing' ? '⏳' : feishuStatus === 'success' ? '✅' : '❌' }} {{ feishuStatusMsg }}
       </div>
+
+      <details class="set-help">
+        <summary>飞书应用配置引导</summary>
+        <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6; padding-top: 8px;">
+          <p><strong>1.</strong> 打开 <a href="https://open.feishu.cn/app" target="_blank">飞书开放平台</a>，创建企业自建应用。</p>
+          <p><strong>2.</strong> 在「权限管理」中添加 <code>bitable:app</code> 及读写多维表格记录权限。</p>
+          <p><strong>3.</strong> 在「安全设置」中添加当前域名（如 localhost）。</p>
+          <p><strong>4.</strong> 发布应用并获取 App ID 和 App Secret。</p>
+          <p><strong>5.</strong> 在多维表格中添加 <code>ai_news</code> 表（字段：标题/链接/摘要/分类/创建时间）。</p>
+          <p><strong>6.</strong> 将 app_token 与各表 ID 填入上方。</p>
+          <p><strong>7.</strong> 未配置飞书也能用：AI 资讯支持纯本地 RSS 采集，数据存浏览器 IndexedDB。</p>
+        </div>
+      </details>
     </div>
 
-    <!-- ====== 大模型配置 ====== -->
     <div class="card">
-      <div class="card-title">🧠 大模型配置（可选，用于 AI 资讯智能整理）</div>
+      <div class="card-title">📄 知识库设置 · 通用入口（腾讯文档等）</div>
+      <p class="set-hint">填写后，在「AI 资讯」点「复制 Markdown」会自动打开此链接，方便一键粘贴归档到腾讯文档、Notion 等。</p>
+      <div class="form-group">
+        <label class="form-label">文档链接（可选）</label>
+        <input v-model="tencentDocUrl" class="input" placeholder="https://docs.qq.com/..." />
+      </div>
+      <button class="btn btn-primary" @click="saveTencentDoc">💾 保存</button>
+    </div>
+
+    <!-- ====== 模型设置 ====== -->
+    <div class="card">
+      <div class="card-title">🧠 模型设置（大模型）</div>
+      <p class="set-hint">用于 AI 资讯智能整理、英语学习单元生成、全局 AI 助手对话。可指定具体模型并测试是否生效。</p>
 
       <div class="form-group">
         <label class="form-label">服务商</label>
@@ -261,36 +360,50 @@ onMounted(loadSettings)
         </select>
       </div>
 
-      <div class="form-group" v-if="llmProvider !== 'none'">
-        <label class="form-label">API Key</label>
-        <input v-model="llmApiKey" class="input" type="password" :placeholder="`${llmProvider} API Key`" />
-      </div>
+      <template v-if="llmProvider !== 'none'">
+        <div class="form-group">
+          <label class="form-label">选择模型</label>
+          <select v-model="modelSelect" class="select">
+            <option v-for="m in presetModels" :key="m.value" :value="m.value">{{ m.label }}</option>
+            <option value="__custom__">✏️ 自定义模型名</option>
+          </select>
+          <input
+            v-if="isCustomModel"
+            v-model="llmCustomModel"
+            @input="onCustomInput"
+            class="input"
+            style="margin-top: 8px;"
+            placeholder="填写模型名，如 deepseek-chat"
+          />
+        </div>
 
-      <button class="btn btn-primary" @click="saveLLM">💾 保存</button>
+        <div class="form-group">
+          <label class="form-label">API Key</label>
+          <input v-model="llmApiKey" class="input" type="password" :placeholder="`${llmProvider} API Key`" />
+        </div>
+
+        <div class="model-eff">当前生效模型：<b>{{ effectiveModelLabel }}</b></div>
+
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-primary" @click="saveLLM">💾 保存</button>
+          <button class="btn btn-secondary" @click="testLLM" :disabled="llmStatus.state === 'testing'">
+            {{ llmStatus.state === 'testing' ? '测试中...' : '🔌 测试连接' }}
+          </button>
+        </div>
+
+        <div v-if="llmStatus.state !== 'idle'" class="model-status" :class="llmStatus.state">
+          {{ llmStatus.state === 'testing' ? '⏳' : llmStatus.state === 'success' ? '✅' : '❌' }} {{ llmStatus.msg }}
+        </div>
+      </template>
     </div>
 
-    <!-- ====== 腾讯文档快捷入口 ====== -->
-    <div class="card">
-      <div class="card-title">📄 腾讯文档 / 知识库入口</div>
-      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
-        填写后，在「AI 资讯」点「复制 Markdown」会自动打开此链接，方便一键粘贴归档。
-      </p>
-      <div class="form-group">
-        <label class="form-label">文档链接（可选）</label>
-        <input v-model="tencentDocUrl" class="input" placeholder="https://docs.qq.com/..." />
-      </div>
-      <button class="btn btn-primary" @click="saveTencentDoc">💾 保存</button>
-    </div>
-
-    <!-- ====== 资讯源管理 ====== -->
+    <!-- ====== 资料资源设置 ====== -->
     <div class="card">
       <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-        <span>📡 AI 资讯源管理（免费 RSS）</span>
+        <span>📡 资料资源设置 · AI 资讯源（免费 RSS）</span>
         <button class="btn btn-sm btn-secondary" @click="resetNewsSources">恢复默认</button>
       </div>
-      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
-        勾选启用的源会在「AI 资讯」一键采集时拉取；无需任何 API Key。
-      </p>
+      <p class="set-hint">勾选启用的源会在「AI 资讯」一键采集时拉取；无需任何 API Key。</p>
       <div v-for="s in newsSources" :key="s.id"
         style="display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border);">
         <label style="display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;">
@@ -313,6 +426,21 @@ onMounted(loadSettings)
       </div>
     </div>
 
+    <!-- ====== 外观设置 ====== -->
+    <div class="card">
+      <div class="card-title">🎨 外观设置</div>
+      <p class="set-hint">选择浅色 / 深色主题，或跟随系统。</p>
+      <div class="seg">
+        <button
+          v-for="t in themeOptions"
+          :key="t.value"
+          class="seg-item"
+          :class="{ active: theme === t.value }"
+          @click="setTheme(t.value)"
+        >{{ t.label }}</button>
+      </div>
+    </div>
+
     <!-- ====== 数据管理 ====== -->
     <div class="card">
       <div class="card-title">🗄 数据管理</div>
@@ -323,27 +451,6 @@ onMounted(loadSettings)
           <input type="file" accept=".json" @change="importData" style="display: none;" />
         </label>
         <button class="btn btn-danger btn-block" @click="clearAllData">🗑 清除所有本地数据</button>
-      </div>
-    </div>
-
-    <!-- 配置说明 -->
-    <div class="card">
-      <div class="card-title">📖 飞书应用配置引导</div>
-      <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
-        <p><strong>1.</strong> 打开 <a href="https://open.feishu.cn/app" target="_blank">飞书开放平台</a>，创建企业自建应用。</p>
-        <p><strong>2.</strong> 在「权限管理」中添加以下权限：</p>
-        <ul style="margin-left: 16px;">
-          <li>bitable:app（多维表格）</li>
-          <li>读取/写入多维表格记录</li>
-        </ul>
-        <p><strong>3.</strong> 在「安全设置」中添加当前域名（如 localhost）。</p>
-        <p><strong>4.</strong> 发布应用并获取 App ID 和 App Secret。</p>
-        <p><strong>5.</strong> 在飞书中创建多维表格，添加以下数据表：</p>
-        <ul style="margin-left: 16px;">
-          <li><code>ai_news</code>：字段「标题」「链接」「摘要」「分类」「创建时间」</li>
-        </ul>
-        <p><strong>6.</strong> 将多维表格的 app_token 和各表 ID 填入上方配置。</p>
-        <p><strong>7.</strong> 未配置飞书也能用：AI 资讯支持纯本地 RSS 采集（见「资讯源管理」），数据存在浏览器 IndexedDB。</p>
       </div>
     </div>
   </div>

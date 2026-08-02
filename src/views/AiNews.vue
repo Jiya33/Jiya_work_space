@@ -194,17 +194,51 @@ async function syncAllToFeishu() {
 }
 
 // 复制 Markdown 到腾讯文档 / 其他知识库
-async function copyMarkdown() {
-  const list = items.value.filter(i => i.isFavorite)
-  const source = list.length > 0 ? list : filteredItems.value
-  if (source.length === 0) { showToast('没有可导出的内容', 'error'); return }
-  const md = toMarkdown(source as NewsItem[])
+async function copyMarkdownItems(list: NewsItem[]) {
+  if (list.length === 0) { showToast('没有可导出的内容', 'error'); return }
+  const md = toMarkdown(list)
   try {
     await copyToClipboard(md)
     showToast('Markdown 已复制，可直接粘贴到腾讯文档/Notion')
     if (tencentDocUrl.value) window.open(tencentDocUrl.value, '_blank')
   } catch {
     showToast('复制失败，请手动选择', 'error')
+  }
+}
+
+async function copyMarkdown() {
+  const list = items.value.filter(i => i.isFavorite)
+  const source = (list.length > 0 ? list : filteredItems.value) as NewsItem[]
+  await copyMarkdownItems(source)
+}
+
+// 转存知识库（飞书 / 腾讯文档 / 复制 Markdown 可选）
+const showKbMenu = ref(false)
+const kbItem = ref<NewsItem | null>(null) // null = 批量模式
+
+const availableKBs = computed(() => [
+  { key: 'feishu', label: '飞书多维表格', icon: '🪶', available: feishuReady.value, hint: '请在设置配置飞书' },
+  { key: 'tencent', label: '腾讯文档', icon: '📄', available: !!tencentDocUrl.value, hint: '请在设置填写腾讯文档链接' },
+  { key: 'md', label: '复制 Markdown', icon: '📋', available: true, hint: '' }
+])
+
+function openKbMenu(item: NewsItem | null) {
+  kbItem.value = item
+  showKbMenu.value = true
+}
+
+async function doSyncKb(kb: { key: string }) {
+  showKbMenu.value = false
+  if (kb.key === 'feishu') {
+    if (kbItem.value) await syncToFeishu(kbItem.value)
+    else await syncAllToFeishu()
+  } else if (kb.key === 'tencent') {
+    if (!tencentDocUrl.value) { showToast('请先在「设置」填写腾讯文档链接', 'error'); return }
+    if (kbItem.value) await copyMarkdownItems([kbItem.value])
+    else await copyMarkdown()
+  } else {
+    if (kbItem.value) await copyMarkdownItems([kbItem.value])
+    else await copyMarkdown()
   }
 }
 
@@ -232,7 +266,7 @@ onMounted(async () => {
       </button>
       <button class="btn btn-sm btn-secondary" @click="showForm = true">+ 手动添加</button>
       <button class="btn btn-sm btn-secondary" @click="copyMarkdown">📋 复制 Markdown</button>
-      <button class="btn btn-sm btn-secondary" @click="syncAllToFeishu" :disabled="loading">🪶 批量转存飞书</button>
+      <button class="btn btn-sm btn-secondary" @click="openKbMenu(null)" :disabled="loading">📚 批量转存知识库</button>
       <button class="btn btn-sm btn-secondary" @click="showSources = !showSources">
         📡 资讯源({{ sources.filter(s => s.enabled).length }})
       </button>
@@ -312,8 +346,28 @@ onMounted(async () => {
         <button class="btn btn-sm btn-secondary" @click="toggleRead(i)">
           {{ i.isRead ? '标为未读' : '标为已读' }}
         </button>
-        <button class="btn btn-sm btn-secondary" @click="syncToFeishu(i)">🪶 转存飞书</button>
+        <button class="btn btn-sm btn-secondary" @click="openKbMenu(i)">📚 转存知识库</button>
         <button class="btn btn-sm" style="color: var(--danger);" @click="deleteItem(i)">删除</button>
+      </div>
+    </div>
+
+    <!-- 转存知识库弹窗 -->
+    <div v-if="showKbMenu" class="modal-overlay" @click.self="showKbMenu = false">
+      <div class="modal" style="max-width: 360px;">
+        <div class="modal-header">
+          <h3>📚 转存到知识库</h3>
+          <button class="modal-close" @click="showKbMenu = false">✕</button>
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.6;">
+          {{ kbItem ? '将这条资讯转存到选中的知识库' : '将收藏夹中尚未转存的资讯批量转存' }}
+        </p>
+        <button v-for="kb in availableKBs" :key="kb.key"
+          class="kb-opt" :class="{ disabled: !kb.available }" @click="doSyncKb(kb)">
+          <span class="kb-ic">{{ kb.icon }}</span>
+          <span class="kb-lbl">{{ kb.label }}</span>
+          <span v-if="!kb.available" class="kb-hint">{{ kb.hint }}</span>
+          <span v-else-if="kb.key === 'feishu' && kbItem?.syncedToFeishu" class="kb-hint">已存</span>
+        </button>
       </div>
     </div>
 
